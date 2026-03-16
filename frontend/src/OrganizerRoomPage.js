@@ -1,8 +1,8 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { io } from 'socket.io-client';
 
-const API_BASE_URL = 'https://auction-management.onrender.com/api';
-const SOCKET_URL = 'https://auction-management.onrender.com';
+const API_BASE_URL = 'http://localhost:5000/api';
+const SOCKET_URL = 'http://localhost:5000';
 
 export default function OrganizerRoomPage({ roomId, organizer, onBack }) {
   const [room, setRoom] = useState(null);

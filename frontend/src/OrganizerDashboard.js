@@ -1,6 +1,6 @@
 import React, { useEffect, useEffectEvent, useState } from 'react';
 
-const API_BASE_URL = 'https://auction-management.onrender.com/api';
+const API_BASE_URL = 'http://localhost:5000/api';
 
 export default function OrganizerDashboard({ organizer, onEnterRoom, onLogout }) {
   const [rooms, setRooms] = useState([]);
