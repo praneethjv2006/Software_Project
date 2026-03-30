@@ -1,0 +1,6 @@
+1)observer pattern - Used to notify all participants in an auction room whenever a new bid is placed.
+2)Singleton Pattern - Ensures that only one instance of the Auction System manager exists.
+3)Factory Pattern - Centralizes the creation of auction-related objects.AuctionFactory creates system objects such as:
+AuctionRoom, Item, Participant, Bid
+4)Strategy Pattern - Bidding types(Manual bidding, Automatic bidding, incremental bidding)
+5) State Pattern - manages the item state among(upcoming, ongoing, sold, unsold)

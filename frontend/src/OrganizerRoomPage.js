@@ -1,8 +1,8 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { io } from 'socket.io-client';
 
-const API_BASE_URL = 'http://localhost:5000/api';
-const SOCKET_URL = 'http://localhost:5000';
+const API_BASE_URL = 'http://localhost:4000/api';
+const SOCKET_URL = 'http://localhost:4000';
 
 export default function OrganizerRoomPage({ roomId, organizer, onBack }) {
   const [room, setRoom] = useState(null);

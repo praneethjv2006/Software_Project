@@ -1,6 +1,9 @@
 const prisma = require('../lib/prisma');
 const { getIo } = require('../lib/socketStore');
 const { ensureDefaultOrganizer } = require('./organizerController');
+const AuctionFactory = require('../lib/auctionFactory');
+const { ItemStatuses, getItemState } = require('../lib/itemState');
+const { getRoomSubject } = require('../lib/observerRegistry');
 
 const autoConfigByRoom = new Map();
 const autoTimerByRoom = new Map();
@@ -109,7 +112,7 @@ async function setBoughtItemOrder(roomId, participantId, itemIds) {
 }
 
 function pickRandomUpcomingItem(items) {
-  const upcomingItems = items.filter((item) => item.status === 'upcoming');
+  const upcomingItems = items.filter((item) => item.status === ItemStatuses.UPCOMING);
   if (!upcomingItems.length) return null;
   const randomIndex = Math.floor(Math.random() * upcomingItems.length);
   return upcomingItems[randomIndex];
@@ -219,7 +222,7 @@ async function runAutoProgression(roomId) {
     updates.push(
       prisma.item.update({
         where: { id: nextItem.id },
-        data: { status: 'ongoing' },
+        data: { status: ItemStatuses.IN_PROGRESS },
       })
     );
   }
@@ -281,8 +284,9 @@ exports.createRoom = async (req, res) => {
     return res.status(404).json({ error: 'Organizer not found' });
   }
 
-  const room = await prisma.auctionRoom.create({
-    data: { roomName: roomName.trim(), organizerId: organizer.id },
+  const room = await AuctionFactory.createAuctionRoom({
+    roomName: roomName.trim(),
+    organizerId: organizer.id,
   });
   return res.status(201).json(room);
 };
@@ -333,13 +337,15 @@ async function finalizeCurrentItem(room) {
   if (!room.currentItemId) return [];
 
   const currentItem = await prisma.item.findUnique({ where: { id: room.currentItemId } });
-  if (!currentItem || currentItem.status !== 'ongoing') return [];
+  if (!currentItem || currentItem.status !== ItemStatuses.IN_PROGRESS) return [];
 
   const sold = !!currentItem.winnerId;
+  const itemState = getItemState(currentItem.status);
+  const stateUpdate = itemState.declareWinner({ hasWinner: sold });
   const updates = [
     prisma.item.update({
       where: { id: currentItem.id },
-      data: { status: sold ? 'sold' : 'unsold' },
+      data: stateUpdate,
     }),
     prisma.auctionRoom.update({
       where: { id: room.id },
@@ -389,7 +395,7 @@ exports.selectItem = async (req, res) => {
   }
 
   const selectedItem = room.items.find((item) => item.id === parsedItemId);
-  if (!selectedItem || selectedItem.status !== 'upcoming') {
+  if (!selectedItem || selectedItem.status !== ItemStatuses.UPCOMING) {
     return res.status(400).json({ error: 'Selected item is not available' });
   }
 
@@ -400,7 +406,7 @@ exports.selectItem = async (req, res) => {
     }),
     prisma.item.update({
       where: { id: selectedItem.id },
-      data: { status: 'ongoing' },
+      data: { status: ItemStatuses.IN_PROGRESS },
     }),
   ]);
 
@@ -483,12 +489,12 @@ exports.skipItem = async (req, res) => {
   }
 
   const currentItemId = room.currentItemId;
-  const nextItem = room.items.find((item) => item.status === 'upcoming');
+  const nextItem = room.items.find((item) => item.status === ItemStatuses.UPCOMING);
 
   await prisma.$transaction([
     prisma.item.update({
       where: { id: currentItemId },
-      data: { status: 'unsold' },
+      data: { status: ItemStatuses.UNSOLD },
     }),
     prisma.auctionRoom.update({
       where: { id: roomId },
@@ -498,7 +504,7 @@ exports.skipItem = async (req, res) => {
       ? [
           prisma.item.update({
             where: { id: nextItem.id },
-            data: { status: 'ongoing' },
+            data: { status: ItemStatuses.IN_PROGRESS },
           }),
         ]
       : []),
@@ -527,16 +533,18 @@ exports.nextItem = async (req, res) => {
   }
 
   const currentItem = room.items.find((item) => item.id === room.currentItemId);
-  const nextItem = room.items.find((item) => item.status === 'upcoming');
+  const nextItem = room.items.find((item) => item.status === ItemStatuses.UPCOMING);
 
   const updates = [];
 
   if (currentItem) {
     const sold = !!currentItem.winnerId;
+    const itemState = getItemState(currentItem.status);
+    const stateUpdate = itemState.declareWinner({ hasWinner: sold });
     updates.push(
       prisma.item.update({
         where: { id: currentItem.id },
-        data: { status: sold ? 'sold' : 'unsold' },
+        data: stateUpdate,
       })
     );
 
@@ -559,7 +567,7 @@ exports.nextItem = async (req, res) => {
 
   if (nextItem) {
     updates.push(
-      prisma.item.update({ where: { id: nextItem.id }, data: { status: 'ongoing' } })
+      prisma.item.update({ where: { id: nextItem.id }, data: { status: ItemStatuses.IN_PROGRESS } })
     );
   }
 
@@ -601,8 +609,12 @@ exports.configureAutoAuction = async (req, res) => {
   return res.json(withAutoMeta(updatedRoom));
 };
 
-exports.handleBidPlaced = async (roomId) => {
+exports.handleBidPlaced = async (roomId, bidPayload) => {
   await startAutoTimer(roomId);
+  if (bidPayload) {
+    const subject = getRoomSubject(roomId);
+    subject.notifyObservers(bidPayload);
+  }
   await emitRoomUpdate(roomId);
 };
 

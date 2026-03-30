@@ -1,6 +1,7 @@
 const { Server } = require('socket.io');
-const prisma = require('./lib/prisma');
-const { emitRoomUpdate, handleBidPlaced, setBoughtItemOrder } = require('./controllers/roomController');
+const { emitRoomUpdate, setBoughtItemOrder } = require('./controllers/roomController');
+const { processBid } = require('./lib/bidProcessor');
+const { getRoomSubject } = require('./lib/observerRegistry');
 const { setIo } = require('./lib/socketStore');
 
 const presenceByRoom = new Map();
@@ -46,58 +47,41 @@ function attachSocket(server) {
       }
 
       const roomPresence = getRoomPresence(parsedRoomId);
-      roomPresence.set(socket.id, {
+      const presenceEntry = {
         id: socket.id,
         role,
         participantId: participantId || null,
         organizerId: organizerId || null,
         sessionId: sessionId || socket.id,
         active: true,
-      });
+      };
+      roomPresence.set(socket.id, presenceEntry);
 
       socket.join(`room:${parsedRoomId}`);
+
+      if (role === 'participant' && participantId) {
+        socket.join(`participant:${participantId}`);
+        const subject = getRoomSubject(parsedRoomId);
+        subject.addObserver({ id: participantId });
+      }
 
       await emitRoomUpdate(parsedRoomId);
       io.to(`room:${parsedRoomId}`).emit('presence:update', buildPresencePayload(parsedRoomId));
     });
 
-    socket.on('placeBid', async ({ roomId, participantId, amount }) => {
-      const parsedRoomId = Number(roomId);
-      if (Number.isNaN(parsedRoomId)) return;
+    socket.on('placeBid', async ({ roomId, participantId, amount, strategy, increment, maxBid }) => {
+      const result = await processBid({
+        roomId,
+        participantId,
+        amount,
+        strategy,
+        increment,
+        maxBid,
+      });
 
-      const room = await prisma.auctionRoom.findUnique({ where: { id: parsedRoomId } });
-      if (!room || !room.currentItemId) return;
-
-      const item = await prisma.item.findUnique({ where: { id: room.currentItemId } });
-      const participant = await prisma.participant.findUnique({ where: { id: Number(participantId) } });
-
-      if (!item || !participant || item.status !== 'ongoing') return;
-
-      if (item.winnerId === participant.id) {
-        socket.emit('bid:error', { message: 'You already have the highest bid' });
-        return;
+      if (!result.ok) {
+        socket.emit('bid:error', { message: result.error || 'Bid failed' });
       }
-
-      const bidAmount = Number(amount);
-      if (Number.isNaN(bidAmount) || bidAmount <= 0) return;
-      if (item.currentBid != null && bidAmount <= item.currentBid) return;
-      if (bidAmount > participant.remainingPurse) return;
-
-      await prisma.$transaction([
-        prisma.bid.create({
-          data: {
-            amount: bidAmount,
-            participantId: participant.id,
-            itemId: item.id,
-          },
-        }),
-        prisma.item.update({
-          where: { id: item.id },
-          data: { currentBid: bidAmount, winnerId: participant.id },
-        }),
-      ]);
-
-      await handleBidPlaced(parsedRoomId);
     });
 
     socket.on('reorderBoughtItems', async ({ roomId, participantId, itemIds }) => {
@@ -125,7 +109,12 @@ function attachSocket(server) {
     socket.on('disconnect', () => {
       for (const [roomId, roomPresence] of presenceByRoom.entries()) {
         if (roomPresence.has(socket.id)) {
+          const entry = roomPresence.get(socket.id);
           roomPresence.delete(socket.id);
+          if (entry && entry.role === 'participant' && entry.participantId) {
+            const subject = getRoomSubject(roomId);
+            subject.removeObserver({ id: entry.participantId });
+          }
           io.to(`room:${roomId}`).emit('presence:update', buildPresencePayload(roomId));
         }
       }

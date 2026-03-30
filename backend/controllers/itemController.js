@@ -1,5 +1,6 @@
 const prisma = require('../lib/prisma');
 const { emitRoomUpdate } = require('./roomController');
+const AuctionFactory = require('../lib/auctionFactory');
 
 exports.addItem = async (req, res) => {
   const roomId = Number(req.params.roomId);
@@ -18,15 +19,10 @@ exports.addItem = async (req, res) => {
   if (!room) {
     return res.status(404).json({ error: 'Room not found' });
   }
-  const item = await prisma.item.create({
-    data: {
-      name: name.trim(),
-      price: parsedPrice,
-      firstBid: parsedPrice,
-      currentBid: parsedPrice,
-      status: 'upcoming',
-      auctionRoomId: roomId,
-    },
+  const item = await AuctionFactory.createItem({
+    name: name.trim(),
+    price: parsedPrice,
+    roomId,
   });
   await emitRoomUpdate(roomId);
   return res.status(201).json(item);
