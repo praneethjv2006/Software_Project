@@ -6,6 +6,7 @@
   "scripts": {
     "start": "node index.js",
     "dev": "node index.js",
+    "test": "jest",
     "db:push": "prisma db push --schema=prisma/schema.prisma",
     "prisma:generate": "prisma generate --schema=prisma/schema.prisma",
     "seed:organizer": "node prisma/seedOrganizer.js"
@@ -17,6 +18,8 @@
     "socket.io": "^4.7.5"
   },
   "devDependencies": {
+    "jest": "^29.7.0",
+    "supertest": "^6.3.4",
     "prisma": "^6.19.2"
   }
 }
